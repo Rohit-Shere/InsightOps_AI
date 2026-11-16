@@ -64,6 +64,75 @@ def to_json_safe(value):
     return value
 
 
+def normalize_statistical_arguments(
+    dataset_name: str,
+    group_column: str,
+    group1_value,
+    group2_value,
+    method: str = None,
+):
+    """
+    Normalize LLM-generated arguments before
+    passing them to the statistical engine.
+    """
+
+    # Normalize method only when provided
+    if method is not None:
+        method = method.strip().lower().replace("-", "_")
+
+        method_aliases = {
+            "mann_whitney": "mannwhitney",
+            "mannwhitneyu": "mannwhitney",
+            "welch_t_test": "welch",
+            "welch_t": "welch",
+        }
+
+        method = method_aliases.get(method, method)
+
+        if method not in {"mannwhitney", "welch"}:
+            raise ValueError(
+                "method must be 'mannwhitney' or 'welch'."
+            )
+
+    from app.tools.dataset_registry import DATASET_REGISTRY
+
+    if dataset_name not in DATASET_REGISTRY:
+        raise ValueError(f"Unknown dataset: {dataset_name}")
+
+    dataset_metadata = DATASET_REGISTRY[dataset_name]
+
+    boolean_columns = dataset_metadata.get(
+        "boolean_columns", []
+    )
+
+    if group_column in boolean_columns:
+
+        def convert_boolean(value):
+            if isinstance(value, bool):
+                return value
+
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+
+                if normalized == "true":
+                    return True
+
+                if normalized == "false":
+                    return False
+
+            raise ValueError(
+                f"Invalid boolean group value: {value}"
+            )
+
+        group1_value = convert_boolean(group1_value)
+        group2_value = convert_boolean(group2_value)
+
+    return {
+        "method": method,
+        "group1_value": group1_value,
+        "group2_value": group2_value,
+    }
+
 # ---------------------------------------------------------
 # 2. DATASET AND COLUMN VALIDATION
 # ---------------------------------------------------------
@@ -288,6 +357,18 @@ def run_group_comparison(
 
         if not 0 < alpha < 1:
             raise ValueError("alpha must be between 0 and 1.")
+        
+        normalized = normalize_statistical_arguments(
+            dataset_name=dataset_name,
+            group_column=group_column,
+            group1_value=group1_value,
+            group2_value=group2_value,
+            method=method,
+        )
+
+        method = normalized["method"]
+        group1_value = normalized["group1_value"]
+        group2_value = normalized["group2_value"]
 
         return _execute_analysis(
             dataset_name,
@@ -400,6 +481,7 @@ def run_mean_confidence_interval(
         }
 
 
+
 @tool
 def run_difference_confidence_interval(
     dataset_name: str,
@@ -421,12 +503,26 @@ def run_difference_confidence_interval(
             metadata,
             ("categorical", "boolean"),
         )
-        _validate_column(target_column, metadata, ("numeric",))
+        _validate_column(
+            target_column,
+            metadata,
+            ("numeric",),
+        )
 
         if not 0 < confidence_level < 1:
             raise ValueError(
                 "confidence_level must be between 0 and 1."
             )
+
+        normalized = normalize_statistical_arguments(
+            dataset_name=dataset_name,
+            group_column=group_column,
+            group1_value=group1_value,
+            group2_value=group2_value,
+        )
+
+        group1_value = normalized["group1_value"]
+        group2_value = normalized["group2_value"]
 
         return _execute_analysis(
             dataset_name,
@@ -445,7 +541,6 @@ def run_difference_confidence_interval(
             "error_type": type(error).__name__,
             "error": str(error),
         }
-
 
 # ---------------------------------------------------------
 # 8. CATEGORICAL ANALYSIS

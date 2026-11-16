@@ -119,7 +119,7 @@ def detect_zscore_outliers(
         "outlier_percentage": float(
             mask.sum() / values.size * 100
         ),
-        "outlier_indices": data.index[mask].tolist(),
+        # "outlier_indices": data.index[mask].tolist(),
         "outlier_values": data.loc[mask, column].tolist()
     }
 
